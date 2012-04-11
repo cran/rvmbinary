@@ -14,7 +14,7 @@ using namespace std;
 
 int fullstatistics(int likelihood,const matrix &PHI,const matrix &BASIS,const matrix &BASIS2,matrix &beta,matrix& Sigma,matrix& Mu
 				   , matrix &Alpha,double &logML,const matrix &Targets,const std::vector<int> &Used,matrix& Factor
-				   ,matrix &S_out, matrix &Q_in,matrix &S_in, matrix &Q_out,matrix &betaBASIS_PHI,matrix &Gamma){
+				   ,matrix &S_out, matrix &Q_in,matrix &S_in, matrix &Q_out,matrix &betaBASIS_PHI,matrix &BASIS_PHI,matrix &BASIS_Targets,matrix &Gamma){
 
 	int MAX_POSTMODE_ITS=25;
 	//Check these are the right way round
@@ -24,12 +24,150 @@ int fullstatistics(int likelihood,const matrix &PHI,const matrix &BASIS,const ma
 	matrix y(Targets.rows,1),e(Targets.rows,1);
 	int error_output=0;
 	
+	
+	
 	matrix U;
 	double dataLikely;
 	matrix Ui;
 
 	if (likelihood==0){
-		//Gaussian Case
+		//Gaussian Case (Regression)
+		matrix temp;
+		
+		mprod(PHI,PHI,temp,1,1.0);
+
+		//mprod(temp,beta,H,0,1.0);
+		
+		for(int i=0; i<(temp.rows*temp.cols); i++){
+			temp.data[i]*=beta.data[0];
+		}
+		
+		for (int i=0; i<Alpha.rows; i++) {
+			temp.data[i+i*temp.rows]+=Alpha.data[i];
+		}
+		
+
+		int error=0;
+		error=chol(temp, U);
+	
+		
+		
+		if (error!=0){
+			Rprintf("***Warning ** Ill conditioned Hessian (%f)\n",error);
+			return(1);
+		}
+		
+
+		if (U.rows==1 and U.cols==1){
+			Ui.reset(1, 1);	
+			Ui.data[0]=1.0/U.data[0];
+		}
+		else{
+			Ui.reset(U.rows, U.cols);
+			inverse(U, Ui);
+		}
+		
+		
+		mprod(Ui,Ui,Sigma,2,1.0);
+		
+		mprod(PHI,Targets,temp,1,1.0);
+		
+		matrix temp2;
+		mprod(Sigma,temp,temp2,0,1.0);
+		mprod(temp2,beta,Mu,0,1.0);
+		
+
+		matrix y;
+		mprod(PHI,Mu,y,0,1.0);
+		
+		dataLikely=0;
+		for(int i=0; i<y.rows; i++){
+			dataLikely+=(Targets.data[i]-y.data[i])*(Targets.data[i]-y.data[i]);
+		}
+		
+		dataLikely=(BASIS.rows*log(beta.data[0])-beta.data[0]*dataLikely)/2.0;
+		
+		double logdetHOver2=0.0;
+		for (int i=0; i<U.rows; i++){
+			logdetHOver2+=log(U.data[i*U.cols+i]);
+		}
+		double sumlogalpha=0.0;
+		
+		
+		for (int i=0; i<Alpha.rows; i++){
+			sumlogalpha+=log(Alpha.data[i]);
+		}
+		
+		temp.reset(Mu.rows,Mu.cols);
+		for (int i=0; i<temp.rows; i++){
+			for(int k=0; k<temp.cols; k++){
+				temp.data[i+k*temp.rows]=pow(Mu.data[i+k*temp.rows],2);
+			}
+		}
+		
+
+		mprod(temp, Alpha, temp2, 1, 1.0);
+		logML=dataLikely-temp2.data[0]/2.0+sumlogalpha/2.0-logdetHOver2;
+		
+	
+		
+		matrix DiagC(Ui.rows,1);
+		for (int i=0; i<Ui.rows; i++) {
+			DiagC.data[i]=0.0;
+			for(int k=0; k<Ui.cols; k++){
+				DiagC.data[i]+=(Ui.data[i+k*Ui.rows]*Ui.data[i+k*Ui.rows]);
+			}
+		}
+		Gamma.reset(Ui.rows,1);
+		for(int i=0; i<Gamma.rows; i++){
+			Gamma.data[i]=1-Alpha.data[i]*DiagC.data[i];
+
+		}		
+		
+		betaBASIS_PHI.reset(BASIS_PHI.rows,BASIS_PHI.cols);
+		for(int i=0; i<(betaBASIS_PHI.rows*betaBASIS_PHI.cols); i++){
+			betaBASIS_PHI.data[i]=beta.data[0]*BASIS_PHI.data[i];
+		}
+				
+		matrix bb_phi_Ui;
+		mprod(betaBASIS_PHI,Ui,bb_phi_Ui,0,1.0);
+		
+		S_in.reset(bb_phi_Ui.rows,1);
+		S_out.reset(bb_phi_Ui.rows,1);
+		
+		for (int i=0; i<bb_phi_Ui.rows; i++) {
+			S_in.data[i]=0;
+			for(int k=0; k<bb_phi_Ui.cols; k++){
+				S_in.data[i]+=(bb_phi_Ui.data[i+bb_phi_Ui.rows*k]*bb_phi_Ui.data[i+bb_phi_Ui.rows*k]);
+			}
+			S_in.data[i]=beta.data[0]-S_in.data[i];
+			S_out.data[i]=S_in.data[i];
+		}		
+		
+		mprod(BASIS_PHI,Mu,temp,0,1.0);
+		
+
+		
+		Q_in.reset(BASIS_Targets.rows,BASIS_Targets.cols);
+		Q_out.reset(BASIS_Targets.rows,BASIS_Targets.cols);
+		
+		for(int i=0; i<BASIS_Targets.rows; i++){
+			Q_in.data[i]=beta.data[0]*(BASIS_Targets.data[i]-temp.data[i]);
+			Q_out.data[i]=Q_in.data[i];
+		}
+
+		for (int i=0; i<Used.size(); i++){
+			S_out.data[Used[i]]= (Alpha.data[i]*S_in.data[Used[i]]/(Alpha.data[i]-S_in.data[Used[i]]));
+			Q_out.data[Used[i]]= (Alpha.data[i]*Q_in.data[Used[i]]/(Alpha.data[i]-S_in.data[Used[i]]));
+		}
+
+		Factor.reset(S_out.rows,1);
+		for(int i=0; i<Factor.rows; i++){
+			Factor.data[i]=(Q_out.data[i]*Q_out.data[i])-S_out.data[i];
+		}
+
+		
+			
 	}
 	else{
 
@@ -190,6 +328,7 @@ int PosteriorMode(matrix &U,const matrix &BASIS,matrix &beta, const matrix &Targ
 		
 		for (int i=0; i<Alpha.rows; i++){
 			tempAMu.data[i]=Alpha.data[i]*Mu.data[i];
+
 		}
 		
 		matrix g;
@@ -240,7 +379,7 @@ int PosteriorMode(matrix &U,const matrix &BASIS,matrix &beta, const matrix &Targ
 			}
 			//errorLog=temperrorLog;
 			//ERROR LOG INCOMPLETE
-			//Rprintf("PM convergence (<%g) after %d iterations, |g| = %g\n",GRADIENT_MIN,iteration,maxg);
+			//("PM convergence (<%g) after %d iterations, |g| = %g\n",GRADIENT_MIN,iteration,maxg);
 			break;
 		}
 		matrix DeltaMu(g.rows,g.cols);
@@ -285,7 +424,7 @@ int PosteriorMode(matrix &U,const matrix &BASIS,matrix &beta, const matrix &Targ
 		}
 		if (step!=0){
 			//Could print out for higher verbosity 
-			Rprintf("ARE WE HERE \n");
+			Rprintf("PM stopping due to back-off limit\n");
 			break;
 		}
 		

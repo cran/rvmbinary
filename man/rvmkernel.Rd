@@ -1,39 +1,32 @@
-\name{rvmbinary}
-\alias{rvmbinary}
-\alias{rvmbinary.formula}
-\alias{rvmbinary.default}
-\alias{predict.rvmbinary}
-\alias{print.rvmbinary}
-
-\title{Relevance Vector Machine}
+\name{rvmkernel}
+\alias{rvmkernel}
+\alias{rvmkernel.formula}
+\alias{rvmkernel.default}
+\alias{print.rvmkernel}
+\title{Calculate Kernels for RVM Binary}
 
 \description{
   The Relevance Vector Machine is a Bayesian model for regression and
   classification of identical functional form to the support vector
-  machine.
+  machine. This method calculates kernels for \code{rvmbinary}
   }
 \usage{
-\method{rvmbinary}{formula}(formula, data=NULL, ...)
 
-\method{rvmbinary}{default}(x,y, kernel="rbfdot", parameters=c(0.1),iterations=100, noisevar=0.1, minmaxdiff = 1e-3, ...) 
+\method{rvmkernel}{formula}(formula, data=NULL, ...)
 
-\method{print}{rvmbinary}(x, ...)
-\method{predict}{rvmbinary}(object,newdata, ...)
-
+\method{rvmkernel}{default}(x,kernel= "gaus",parameters=c(0.1), ...)
+\method{print}{rvmkernel}(x, ...)
 }
 
 
 
 \arguments{
-  \item{formula}{Formula interface for rvmbinary}
+ \item{formula}{Formula interface for rvmkernel}
+\item{data}{For use with formula interface}
   \item{x}{The data to be fit by RVM.
     When not using a formula x can be a matrix or vector containing the training
-    data or a kernel matrix of class \code{rvmkernel} of the training data.}
-  \item{data}{a data frame containing the variables in the model when using the formula function}
+    data}
 	  
-  \item{y}{a response vector with one label for each row/component of \code{x}. Can be either
-    a factor (for classification tasks) or a numeric vector (for
-    regression).}
  \item{kernel}{the kernel function used in training and predicting. The AA Kernel is supplied built in which is used by setting the kernel parameter to "aa".
    The Kernlab kernels are also supplied if Kernlab is installed which provides the most popular kernel functions. These can be used by setting the kernel parameter to the following
     strings:
@@ -83,73 +76,36 @@
     }
     (default = c(0.1).}
 
-
-  \item{noisevar}{the initial noise variance}
-  \item{iterations}{Number of iterations allowed (default: 100)} 
-  \item{minmaxdiff}{termination criteria. Stop when max difference is
-    equal to this parameter (default:1e-3) }
- \item{object}{The object returned from rvmbinary in order to predict}
-\item{newdata}{New data for testing}
 \item{...}{optional parameters to be passed to the low level function
-    \code{rvmbinary.default}.}
+    \code{rvmkernel.default}.}
+
 }
-\details{The Relevance Vector Machine typically leads to sparser models
-  then the SVM. It is probabilistic by nature and any kernel can be used unlike SVM.
+\details{Produces the kernel necessary for RVM.
   }
 \value{
-  An S4 object of class "rvmbinary" containing the fitted model.
-  Accessor functions can be used to access the slots of the
-  object which include :
+  An S4 object of class "rvmkernel" containing the calculated kernel.  
   
-  
-  \item{kernel}{The kernel used to produce the model}
-  \item{kernelparameter}{The parameter for the kernel}
-  \item{nRV}{Number of relevance vectors}
-  \item{type}{Classification or Regression}
-  \item{vectors}{The relevance vectors}
-  \item{values}{The weights for the relevance vectors}
-
-  
-  ...
+  \item{BASIS}{The calculated kernel}
+ \item{type}{The kernel used}
+  \item{parameter}{The parameter for the kernel}
+  \item{data}{the training data used}  
 }
 \references{
 Tipping, M. E. and A. C. Faul (2003). Fast marginal likelihood maximisation for sparse Bayesian models. In C. M. Bishop and B. J. Frey (Eds.), Proceedings of the Ninth International Workshop on Artificial Intelligence and Statistics, Key West, FL, Jan 3-6.
 
 Robert Lowe, Hamse Yussuf Mussa, John Mitchell, and Robert Glen. Classifying Molecules Using a Sparse Probabilistic Kernel Binary Classifier. J. Chem. Inf. Model. DOI: 10.1021/ci200128w}
-
 \author{ Robert Lowe \cr
 \email{ral64@cam.ac.uk}}
 
 \seealso{ \code{\link{ksvm}}}
 \examples{
-#Classification
-data(iris)
-#Create training and test splits
-datatest=rbind(iris[41:50,],iris[91:100,])
-datatrain=rbind(iris[1:40,],iris[51:90,])
+# create data
+x <- seq(-20,20,0.1)
+y <- sin(x)/x + rnorm(401,sd=0.05)
 
-#Run model
-rvm=rvmbinary(datatrain[,-dim(datatrain)[2]],datatrain[,dim(datatrain)[2]],kernel="rbfdot",parameters=0.1,1000)
+# Calculate the kernel
+tmp=rvmkernel(x,kernel="rbfdot")
 
-#Calculate class probability for test set
-y=predict(rvm,datatest[,-dim(datatest)[2]])
-
-
-
-
-# create data For REGRESSION
-x <- c(seq(-20,-0.1,0.1),seq(0.1,20,0.1))
-y <- sin(x)/x + rnorm(400,sd=0.05)
-
-# train relevance vector machine
-foo <- rvmbinary(x, y)
-foo
-# print relevance vectors
-
-# predict and plot
-ytest <- predict(foo, x)
-plot(x, y, type ="l")
-lines(x, ytest, col="red")
 }
 \keyword{regression}
 \keyword{classification}

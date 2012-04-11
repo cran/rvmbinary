@@ -1,0 +1,17 @@
+b438a8fe0fb82f71e483b2c3ba74ec43 *DESCRIPTION
+21a97dba4bd6ad465b3c0e0f462c1e18 *NAMESPACE
+c8c6a7195116f9c8b6b3bbf4930d74f5 *R/kernel.R
+89aa79e91cdc7325a8e38072f73a484f *R/rvmbinary.R
+08f995615b5f2c72e84e186ec280ebc7 *R/zzz.R
+688339c9752fdaa29a6f31dea5479726 *man/rvmbinary.Rd
+17f607e53e31328c4ed6a232aaaf5658 *man/rvmkernel.Rd
+41602b152aff309d369cbd06ea7f8e87 *src/Makevars
+41602b152aff309d369cbd06ea7f8e87 *src/Makevars.win
+b72f1d7885c2f602a071cbf315781967 *src/aa.cpp
+9a6856b13eb3872fe50b8dffb9bc8438 *src/fullstatistics.cpp
+9a8bd246275d4e00235b2849c86218c5 *src/fullstatistics.h
+cdadc69fb7e22366ecaa0ec8abe28142 *src/main.cpp
+feac11a84604a0cc8503253c31fcda79 *src/matrix.cpp
+9e10259c150bac32d6e1061a220d834e *src/matrix.h
+54a8440b6af8bf9eafb3652da08dca02 *src/matrixops.cpp
+3068dc0a177f1a1bdee357ad6808b6b2 *src/matrixops.h

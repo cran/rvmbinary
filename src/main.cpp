@@ -11,12 +11,12 @@
 extern "C" {
 	
 	
-	void initial (double *a, double *b,int *arows,int *acols,int *PARAMATERrev, double *PARAMATERval, int * maxits) {
+	void initial (double *a, double *b,int *arows,int *acols,int *PARAMATERrev, double *PARAMATERval, int * maxits, int *lk, double *noisevar,double *minmaxdiff) {
 		
 		int ItNum=maxits[0];
-		double MinDeltaLogAlpha=1e-3,MinDeltaLogBeta = 1e-6,AlignmentMax=1-1e-3;
-		
-
+		int likelihood=lk[0];
+		double MinDeltaLogBeta = 1e-6,AlignmentMax=1-1e-3;
+		double MinDeltaLogAlpha=minmaxdiff[0];
 		
 		bool PriorityAddition=0,PriorityDeletion=1,BasisAlignmentTest=1;
 		//Reporting on the iterations
@@ -29,6 +29,24 @@ extern "C" {
 		matrix Targets(cols,1,b);
 		std::vector<int> Used;
 
+		
+		//NoiseSTD to be set as a parameter
+			double NoiseStd=noisevar[0];
+			
+			int BetaUpdateStart=10;
+			int BetaUpdateFrequency=5;
+			double BetaMaxFactor=1000000;
+			double varTargets=0;
+			double sums=0.0,sums2=0.0;
+			
+			for(int i=0; i<Targets.rows; i++){
+				sums+=Targets.data[i];
+				sums2+=(Targets.data[i]*Targets.data[i]);
+			}
+			
+			varTargets=(Targets.rows/((Targets.rows-1)*1.0))*((sums2/Targets.rows)-((sums/Targets.rows)*(sums/Targets.rows)));
+				
+				
 		//***************************************************
 		//***************** INITIALISE **********************
 		//***************************************************
@@ -39,6 +57,7 @@ extern "C" {
 		double INIT_ALPHA_MIN	= 1e-3;
 		//Normalise each Basis vector
 		matrix Scales(1,BASIS.cols);
+		matrix beta(rows,1);
 		
 		for (int k=0; k<BASIS.rows; k++){
 			Scales.data[k]=0;
@@ -61,14 +80,21 @@ extern "C" {
 		matrix TargetsPseudoLinear(arows[0],1);
 		
 		for (int i=0; i<arows[0]; i++){
-			TargetsPseudoLinear.data[i]=(2*Targets.data[i]-1);
-			LogOut.data[i]	= (TargetsPseudoLinear.data[i]*0.9+1)/2.0;
-			LogOut.data[i]=log(LogOut.data[i]/(1-LogOut.data[i]));
+			if(likelihood==0){
+				TargetsPseudoLinear.data[i]=Targets.data[i];
+			}
+			else{
+				TargetsPseudoLinear.data[i]=(2*Targets.data[i]-1);
+				
+				LogOut.data[i]	= (TargetsPseudoLinear.data[i]*0.9+1)/2.0;
+				LogOut.data[i]=log(LogOut.data[i]/(1-LogOut.data[i]));
+			}
 		}
 		
 		matrix proj;
 		vprod(BASIS,TargetsPseudoLinear,proj,1);
 
+		
 		double max=0.0;
 		int maxindex=0;
 		for(int i=0; i<proj.rows; i++){
@@ -82,29 +108,52 @@ extern "C" {
 		matrix PHI,Mu,Alpha;
 		PHI.AddColumn(BASIS, maxindex);
 		Used.push_back(maxindex);
-		linalg(PHI, LogOut,Mu,0);
-
-		Alpha.data=new double[1];
-		Alpha.rows=1;
-		Alpha.cols=1;
 		
-		Rprintf("Initial Alpha = ");
-		if (Mu.data[0]==0)
-			Alpha.data[0]=1;
-		else{
-			double value=1/(Mu.data[0]*Mu.data[0]);
-			if (value<INIT_ALPHA_MIN) 
-				Alpha.data[0]=INIT_ALPHA_MIN;
-			else if(value>INIT_ALPHA_MAX)
-				Alpha.data[0]=INIT_ALPHA_MAX;
-			else
-				Alpha.data[0]=value;
+		if (likelihood==1){
+			linalg(PHI, LogOut,Mu,0);
+			Alpha.data=new double[1];
+			Alpha.rows=1;
+			Alpha.cols=1;
+		
+			if (Mu.data[0]==0)
+				Alpha.data[0]=1;
+			else{
+				double value=1/(Mu.data[0]*Mu.data[0]);
+				if (value<INIT_ALPHA_MIN) 
+					Alpha.data[0]=INIT_ALPHA_MIN;
+				else if(value>INIT_ALPHA_MAX)
+					Alpha.data[0]=INIT_ALPHA_MAX;
+				else
+					Alpha.data[0]=value;
+			}
 		}
+		else{
+			matrix temp;
+			mprod(PHI,PHI,temp,1,1.0);
+			
+			beta.reset(1,1);
+			
+			beta.data[0]=1.0/(NoiseStd*NoiseStd);
+
+			double p=temp.data[0]*beta.data[0];
+			
+			mprod(PHI,Targets,temp,1,1.0);
+			double q=temp.data[0]*beta.data[0];
+			
+			Alpha.data=new double[1];
+			Alpha.rows=1;
+			Alpha.cols=1;
+			Alpha.data[0]=(p*p)/((q*q)-p);
+		}
+			
+		Rprintf("Initial Alpha = ");
 		Rprintf("%f\n", Alpha.data[0]);
+
 		
 		//***************************************************
 		//**************** END OF INITIALISE ****************
 		//***************************************************
+		
 		matrix BASIS2(BASIS.rows,BASIS.cols);
 		for (int i=0; i<BASIS.rows; i++) {
 			for (int k=0; k<BASIS.cols; k++) {
@@ -115,10 +164,17 @@ extern "C" {
 		matrix BASIS_Targets;
 		mprod(BASIS,Targets,BASIS_Targets,1,1.0);
 		matrix S_out,Q_in,S_in,Q_out,Gamma;
-		matrix beta(rows,1),SIGMA,Factor;
+		matrix SIGMA,Factor;
 		double logML;
 		
-		int test_fullstatistics=fullstatistics(1, PHI, BASIS,BASIS2,beta,SIGMA,Mu,Alpha,logML,Targets,Used,Factor,S_out,Q_in,S_in,Q_out,BASIS_B_PHI,Gamma);
+		if(likelihood==0){
+			//It will be computationally advantageous to "cache" this quantity in regression case
+			mprod(BASIS,PHI,BASIS_PHI,1,1.0);
+			
+		}
+		
+		int test_fullstatistics=fullstatistics(likelihood, PHI, BASIS,BASIS2,beta,SIGMA,Mu,Alpha,logML,Targets,Used,Factor,S_out,Q_in,S_in,Q_out,BASIS_B_PHI,BASIS_PHI,BASIS_Targets,Gamma);
+		
 		
 		if(test_fullstatistics==0){
 			
@@ -151,6 +207,7 @@ extern "C" {
 		const int ACTION_ALIGNMENT_SKIP=12;
 		
 		int selectedAction;
+		 
 		/*
 		 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 		 %%
@@ -158,14 +215,19 @@ extern "C" {
 		 %%
 		 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 		 */
+		
 		int iteration_counter=0;
 		bool LAST_ITERATION=1;
 		
 		while (LAST_ITERATION) {
 			
 			iteration_counter+=1;
-			//NEVER Update  iteration??
+
 			bool UpdateIteration=0;
+			if(likelihood==0){
+				UpdateIteration=1;
+			}
+		 
 			/*
 			 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 			 
@@ -174,6 +236,7 @@ extern "C" {
 			 %% Assess all potential actions
 			 %%
 			 */
+		
 			std::vector<double> GoodFactor(M_full);
 			matrix DeltaML(M_full,1);
 			matrix Action(M_full,1);
@@ -220,10 +283,10 @@ extern "C" {
 				DeltaML.data[index_c[i]]= (Delta.data[i]*(Q_in.data[index_c[i]]*Q_in.data[index_c[i]])/(Delta.data[i]*S_in.data[index_c[i]]+1)-log(1+S_in.data[index_c[i]]*Delta.data[i]))/2.0;
 			}
 			
-			
+	
 			//FREE BASIS OPTION NOT AVAILABLE
 			bool anytoDelete=0;
-			if(index_c_neg.size()!=0 and M>1){
+			if(index_c_neg.size()!=0 and Mu.rows>1){
 				for(int i=0; i<index_c_neg.size(); i++){
 					DeltaML.data[index_c_neg[i]]= -(Q_out.data[index_c_neg[i]]*Q_out.data[index_c_neg[i]]/(S_out.data[index_c_neg[i]]+Alpha.data[iu_neg[i]])
 													-log(1+S_out.data[index_c_neg[i]]/Alpha.data[iu_neg[i]]))/2.0;
@@ -301,7 +364,8 @@ extern "C" {
 						j=i;
 				}
 			}
-			
+		
+		 
 			//DIFFERENCE TO MATLAB WITH NU being selected./RVM-Speed -b 0.99 -k Binary -d kbd420
 			//MATLAB 72	0.7476216971706305	0.7476216971706305
 			//C++ 
@@ -311,17 +375,21 @@ extern "C" {
 			 }
 			 */
 			
+		
 			matrix Phi;
 			std::string act;
 			Phi.AddColumn(BASIS, nu);
 			
 			double newAlpha=S_out.data[nu]*S_out.data[nu]/Factor.data[nu];
 			
-			if (!anyWorthwhileAction || (selectedAction==ACTION_REESTIMATE && abs(log(newAlpha)-log(Alpha.data[j]))<MinDeltaLogAlpha && !anytoDelete)){
+			
+			
+			if (!anyWorthwhileAction || (selectedAction==ACTION_REESTIMATE && fabs(log(newAlpha)-log(Alpha.data[j]))<MinDeltaLogAlpha && !anytoDelete)){
 				selectedAction=ACTION_TERMINATE;
 				act="potential termination";
 			}
 			
+
 			if (BasisAlignmentTest){
 				if (selectedAction==ACTION_ADD){
 					matrix p;
@@ -367,7 +435,7 @@ extern "C" {
 			}
 			
 			
-			/*		
+			/*	
 			 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 			 
 			 %% ACTION PHASE
@@ -375,11 +443,13 @@ extern "C" {
 			 %% Implement above decision
 			 %%
 			 */
+
 			bool UPDATE_REQUIRED=0;
 			matrix SIGMANEW;
 			switch (selectedAction) {
 				case ACTION_REESTIMATE:{
 					
+
 					double oldAlpha=Alpha.data[j];
 					Alpha.data[j]=newAlpha;
 					matrix s_j;
@@ -395,12 +465,16 @@ extern "C" {
 						for (int k=0; k<s_j.cols; k++) {
 							tmp.data[i+s_j.rows*k]=s_j.data[i+s_j.rows*k]*kappa;
 							deltaMu.data[i+s_j.rows*k]=tmp.data[i+s_j.rows*k]*-Mu.data[j];
+						}
+					}
+					
+					for (int i=0; i<s_j.rows; i++) {
+						for (int k=0; k<s_j.cols; k++) {
 							Mu.data[i+s_j.rows*k]+=deltaMu.data[i+s_j.rows*k];
 						}
 					}
-					matrix SIGMANEW;
+
 					mprod(tmp, s_j, SIGMANEW, 2, 1.0);
-					
 					for (int i=0; i<SIGMA.rows; i++) {
 						for (int k=0; k<SIGMA.cols; k++) {
 							SIGMANEW.data[i+SIGMANEW.rows*k]=SIGMA.data[i+SIGMA.rows*k]-SIGMANEW.data[i+SIGMANEW.rows*k];
@@ -410,22 +484,21 @@ extern "C" {
 					if (UpdateIteration){
 						matrix tempbbpsj;
 						mprod(BASIS_B_PHI,s_j,tempbbpsj,0,1.0);
-						for (int i=0; i<tempbbpsj.rows; i++){
-							for(int k=0; k<tempbbpsj.cols; k++){
-								tempbbpsj.data[i+tempbbpsj.rows*k]=(tempbbpsj.data[i+tempbbpsj.rows*k]*tempbbpsj.data[i+tempbbpsj.rows*k]);
-							}
-						}
+						
 						for (int i=0; i<S_in.rows; i++) {
-							S_in.data[i]=S_in.data[i]+kappa*(tempbbpsj.data[i]);
+							S_in.data[i]=S_in.data[i]+kappa*(tempbbpsj.data[i]*tempbbpsj.data[i]);
 							
 						}
 						//printoutMatrix(S_in);
 						matrix tmpq;
 						mprod(BASIS_B_PHI, deltaMu, tmpq, 0, 1.0);
+
+						
 						for (int i=0; i<Q_in.rows; i++) {
 							Q_in.data[i]=Q_in.data[i]-tmpq.data[i];
-							
+
 						}
+						
 					}
 					updateCount+=1;
 					act="re-estimation";
@@ -433,16 +506,45 @@ extern "C" {
 				}
 					break;
 				case ACTION_ADD:{
-					matrix B_Phi(beta.rows,beta.cols);
+					
+					matrix B_Phi;
+					matrix BASIS_B_phi;
+
+					if (likelihood==0){
+						
+						matrix BASIS_Phi;
+						mprod(BASIS,Phi,BASIS_Phi,1,1.0);
+						
+						BASIS_PHI.AddColumn(BASIS_Phi, 0);
+						
+						if(beta.rows!=1 || beta.cols!=1){
+							Rprintf("Error: Beta is not 1,1\n");
+						}
+						
+						B_Phi.reset(Phi.rows,Phi.cols);
+						for(int i=0; i<(Phi.rows*Phi.cols); i++){
+							B_Phi.data[i]=beta.data[0]*Phi.data[i];
+						}
+						
+						BASIS_B_phi.reset(BASIS_Phi.rows,BASIS_Phi.cols);
+						for(int i=0; i<(BASIS_Phi.rows*BASIS_Phi.cols); i++){
+							BASIS_B_phi.data[i]=beta.data[0]*BASIS_Phi.data[i];
+						}
+					}
+
+					else if(likelihood==1){
+						
+						B_Phi.reset(beta.rows,beta.cols);
+						
 					for(int i=0; i<B_Phi.rows; i++){
 						for (int k=0; k<B_Phi.cols; k++) {
 							B_Phi.data[i+B_Phi.rows*k]=Phi.data[i+B_Phi.rows*k]*beta.data[i+B_Phi.rows*k];
 						}
 					}
 					
-					matrix BASIS_B_phi;
 					
 					mprod(BASIS,B_Phi,BASIS_B_phi,1,1.0);
+					}
 					
 					matrix tmp0;
 					matrix tmp;
@@ -458,7 +560,7 @@ extern "C" {
 					Alpha.resize(Alpha.rows+1, Alpha.cols);
 					Alpha.data[Alpha.rows-1]=newAlpha;
 					PHI.AddColumn(Phi, 0);
-					
+
 					double s_ii=1/(newAlpha+S_in.data[nu]);
 					matrix s_i(tmp.rows,1);
 					for (int i=0; i<tmp.rows; i++) {
@@ -467,7 +569,7 @@ extern "C" {
 					matrix TAU;
 					mprod(s_i,tmp,TAU,2,-1.0);
 					SIGMANEW.resize(s_i.rows+1, s_i.rows+1);
-					
+
 					for(int i=0; i<SIGMANEW.rows; i++){
 						for(int k=0; k<SIGMANEW.cols; k++){
 							if(i<SIGMA.rows and k<SIGMA.cols){
@@ -488,6 +590,8 @@ extern "C" {
 							}
 						}
 					}
+					
+
 					double mu_i=s_ii*Q_in.data[nu];
 					matrix deltaMu(tmp.rows+1,1);
 					for (int i=0; i<deltaMu.rows-1; i++) {
@@ -502,37 +606,34 @@ extern "C" {
 						Mu.data[i]+=deltaMu.data[i];
 						
 					}
+					
+
 					//printoutMatrix(Mu);
 					if(UpdateIteration){
 						matrix mctmp;
 						mprod(BASIS_B_PHI,tmp,mctmp,0,1.0);
-						matrix mCi(mctmp.rows,mctmp.cols);
-						matrix mCi2=mCi;
 						
-						for (int i=0; i<mCi.rows; i++) {
-							for (int k=0; k<mCi.cols; k++) {
-								mCi.data[i*mCi.rows+k]=BASIS_B_phi.data[i*mCi.rows+k]-mCi.data[i*mCi.rows+k];
-								mCi2.data[i*mCi.rows+k]=mCi.data[i*mCi.rows+k]*mCi.data[i*mCi.rows+k];
-							}
-						}
-						for (int i=0; i<S_in.rows; i++) {
-							S_in.data[i]=S_in.data[i]-s_ii*mCi2.data[i];
-							
-						}
-						//printoutMatrix(S_in);
-						for (int i=0; i<Q_in.rows; i++) {
+						matrix mCi(mctmp.rows,1);
+						
+						for(int i=0; i<mctmp.rows; i++){
+							mCi.data[i] = BASIS_B_phi.data[i] - mctmp.data[i];
+							S_in.data[i]=S_in.data[i]-s_ii*(mCi.data[i]*mCi.data[i]);
 							Q_in.data[i]=Q_in.data[i]-mu_i*mCi.data[i];
-							
 						}
-						
 					}
 					Used.push_back(nu);
 					addCount+=1;
 					act="addition";
 					UPDATE_REQUIRED=true;
+					
 				}
 					break;
 				case ACTION_DELETE:{
+					
+					if(likelihood==0){
+						BASIS_PHI.RemoveColumn(j);
+					}
+					
 					PHI.RemoveColumn(j);
 					Alpha.RemoveRow(j);
 					double s_jj=SIGMA.data[j+SIGMA.rows*j];
@@ -543,7 +644,6 @@ extern "C" {
 					for(int i=0; i<s_j.rows; i++){
 						tmp.data[i]=s_j.data[i]/s_jj;
 					}
-					matrix SIGMANEW;
 					
 					mprod(tmp, s_j, SIGMANEW, 2, 1.0);
 					
@@ -554,26 +654,26 @@ extern "C" {
 					}
 					SIGMANEW.RemoveRow(j);
 					SIGMANEW.RemoveColumn(j);
-					
+									
 					matrix deltaMu(tmp.rows,1);
 					for (int i=0; i<tmp.rows; i++) {
 						deltaMu.data[i]=-Mu.data[j]*tmp.data[i];
-						Mu.data[i]+=deltaMu.data[i];
 						
 					}
+					
 					double mu_j=Mu.data[j];
+
+					for(int i=0; i<Mu.rows; i++){
+						Mu.data[i]+=deltaMu.data[i];
+					}
+
 					Mu.RemoveRow(j);
 					if (UpdateIteration){
 						matrix jPm;
 						mprod(BASIS_B_PHI,s_j,jPm,0,1.0);
-						matrix jPm2(jPm.rows,jPm.cols);
-						for (int i=0; i<jPm.rows; i++) {
-							for (int k=0; k<jPm.cols; k++) {
-								jPm2.data[i+jPm.rows*k]=jPm.data[i+jPm.rows*k]*jPm.data[i+jPm.rows*k];
-							}
-						}
+
 						for (int i=0; i<S_in.rows; i++) {
-							S_in.data[i]=S_in.data[i]+jPm2.data[i]/s_jj;
+							S_in.data[i]=S_in.data[i]+(jPm.data[i]*jPm.data[i])/s_jj;
 							
 						}
 						//printoutMatrix(S_in);
@@ -581,7 +681,7 @@ extern "C" {
 							Q_in.data[i]=Q_in.data[i]+jPm.data[i]*(mu_j/s_jj);
 							
 						}
-						
+
 					}
 					Used.erase(Used.begin()+(j));
 					deleteCount+=1;
@@ -595,10 +695,9 @@ extern "C" {
 			}
 			M=Used.size();
 			
-			//cout << "ACTION: " << act << " of " << nu << " ("<<deltaLogMallrginal<<")"<<endl;
-			
-			
-			/*
+			//Rprintf("ACTION: %s of %d (%g)\n" ,act.c_str(),nu,deltaLogMallrginal);
+
+			 /*
 			 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 			 
 			 %% UPDATE STATISTICS
@@ -607,46 +706,116 @@ extern "C" {
 			 % update the relevant variables
 			 % 
 			 */
+
+
 			if (UPDATE_REQUIRED){
 				if(UpdateIteration){
-					Rprintf("UPDATE ITERATION NOT IMPLEMENTED \n");
-					/*
-					 S_out=S_in;
-					 Q_out=Q_in;
+
+					S_out.reset(S_in.rows,S_in.cols);
+					Q_out.reset(Q_in.rows,Q_in.cols);
+					
+					for(int i=0; i<S_in.rows; i++){
+						S_out.data[i]=S_in.data[i];
+						Q_out.data[i]=Q_in.data[i];
+					}
+					
 					 matrix tmp(Used.size(),1);
 					 for (int i=0; i<Used.size(); i++) {
-					 tmp.data[i]=Alpha.data[i]/(Alpha.data[i]-S_in.data[Used[i]]);
-					 S_out.data[Used[i]]=tmp.data[i]*S_in.data[Used[i]];
-					 Q_out.data[Used[i]]=tmp.data[i]*Q_in.data[Used[i]];
+						 tmp.data[i]=Alpha.data[i]/(Alpha.data[i]-S_in.data[Used[i]]);
+						 S_out.data[Used[i]]=tmp.data[i]*S_in.data[Used[i]];
+						 Q_out.data[Used[i]]=tmp.data[i]*Q_in.data[Used[i]];
 					 }
-					 for (int i=0; i<Q_out.size1(); i++) {
-					 Factor.data[i]=(Q_out.data[i]*Q_out.data[i])-S_out.data[i];
-					 }
-					 SIGMA=SIGMANEW;
-					 for (int i=0; i<Alpha.size1(); i++) {
+					 
+					for (int i=0; i<Q_out.rows; i++) {
+						Factor.data[i]=(Q_out.data[i]*Q_out.data[i])-S_out.data[i];
+					}
+					 
+					SIGMA.reset(SIGMANEW.rows,SIGMANEW.cols);
+					for(int i=0; i<(SIGMA.rows*SIGMA.cols); i++){
+						SIGMA.data[i]=SIGMANEW.data[i];
+					}
+					
+					
+					
+					Gamma.reset(Alpha.rows,1);
+					 for (int i=0; i<Alpha.rows; i++) {
 					 Gamma.data[i]=1-Alpha.data[i]*SIGMA.data[i*SIGMA.cols+i];
 					 }
-					 matrix temp3(beta.size1(),M);		
-					 for(int i=0; i<beta.size1(); i++){
-					 for (int k=0; k<M; k++){
-					 temp3.data[i*temp3.cols+k]=PHI.data[i*PHI+k]*beta.data[i];
-					 }
-					 }
-					 BASIS_B_PHI=trans(matrixprod(temp3,BASIS,1));
-					 */
+					
+					BASIS_B_PHI.reset(BASIS_PHI.rows,BASIS_PHI.cols);
+					
+					for(int i=0; i<(BASIS_PHI.rows*BASIS_PHI.cols); i++){
+						BASIS_B_PHI.data[i]=beta.data[0]*BASIS_PHI.data[i];
+					}
 				}
 				else{
 					double newLogML=0.0;
-					test_fullstatistics=fullstatistics(1, PHI, BASIS,BASIS2,beta,SIGMA,Mu,Alpha,newLogML,Targets,Used,Factor,S_out,Q_in,S_in,Q_out,BASIS_B_PHI,Gamma);
+					test_fullstatistics=fullstatistics(likelihood, PHI, BASIS,BASIS2,beta,SIGMA,Mu,Alpha,newLogML,Targets,Used,Factor,S_out,Q_in,S_in,Q_out,BASIS_B_PHI,BASIS_PHI,BASIS_Targets,Gamma);;
 					deltaLogMallrginal=newLogML-logML;
 				}
+				
 				if(UpdateIteration && deltaLogMallrginal<0){
 					Rprintf("** Alert **  DECREASE IN LIKELIHOOD !!\n");
 				}
+				
 				logML=logML+deltaLogMallrginal;
 				count+=1;
 				logMarginalLog.data[count]=logML;
 			}
+			
+			if(likelihood==0 &(selectedAction==ACTION_TERMINATE || iteration_counter<=BetaUpdateStart || iteration_counter%BetaUpdateFrequency==0 )){
+	
+				double betaz1=beta.data[0];
+				
+				matrix y;
+				
+				mprod(PHI,Mu,y,0,1.0);
+				
+				
+				
+				double e=0.0;
+				for(int i=0; i<y.rows; i++){
+					e+=(Targets.data[i]-y.data[i])*(Targets.data[i]-y.data[i]);
+				}
+				
+				double sumgamma=0.0;
+				
+				for(int i=0; i<(Gamma.rows*Gamma.cols); i++){
+					sumgamma+=Gamma.data[i];
+				}
+				
+				
+				beta.data[0]=(rows-sumgamma)/(e);
+				
+			
+
+				if((BetaMaxFactor/varTargets)<beta.data[0])
+					beta.data[0]=(BetaMaxFactor/varTargets);
+				
+
+				
+				double deltaLogBeta = log(beta.data[0])-log(betaz1);
+
+				if(fabs(deltaLogBeta)>MinDeltaLogBeta){
+
+
+					test_fullstatistics=fullstatistics(likelihood, PHI, BASIS,BASIS2,beta,SIGMA,Mu,Alpha,logML,Targets,Used,Factor,S_out,Q_in,S_in,Q_out,BASIS_B_PHI,BASIS_PHI,BASIS_Targets,Gamma);
+					count+=1;
+
+					logMarginalLog.data[count]=logML;
+				
+					if(selectedAction==ACTION_TERMINATE){
+						selectedAction=ACTION_NOISE_ONLY;
+					}
+				}
+			}
+			
+			
+			
+			
+
+				
+	
 			/*
 			 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 			 
@@ -655,6 +824,7 @@ extern "C" {
 			 % Check if termination still specified, and output diagnostics
 			 % 
 			 */
+		
 			double sumgamma=0.0;
 			for (int i=0; i<Gamma.rows; i++) {
 				sumgamma+=Gamma.data[i];
@@ -665,7 +835,7 @@ extern "C" {
 				sqrtbeta+=sqrt(1.0/beta.data[i]);
 			}		
 			if(selectedAction==ACTION_TERMINATE){
-				Rprintf("** Stopping at iteration %d (Max_delta_ml=%f) **",iteration_counter,deltaLogMallrginal);
+				Rprintf("** Stopping at iteration %d (Max_delta_ml=%e) **",iteration_counter,deltaLogMallrginal);
 				Rprintf("'%4d> L = %.6f\t Gamma = %.2f (M = %d)\n",iteration_counter, logML/N,sumgamma, M);
 				break;
 			}
@@ -674,14 +844,22 @@ extern "C" {
 			
 			
 			if ((iteration_counter%monitor_its==0 || iteration_counter==1)){
-				Rprintf("%5d> L = %.6f\t Gamma = %.2f (M = %d)\n",iteration_counter, logML/N, sumgamma, M);
+				if(likelihood==0){
+					Rprintf("%5d> L = %.6f\t Gamma = %.2f (M = %d)\t s=%.3f \n",iteration_counter, logML/N, sumgamma, M,sqrtbeta);
+				}
+				else{
+				Rprintf("%5d> L = %.6f\t Gamma = %.2f (M = %d)\n",iteration_counter, logML/(N*1.0), sumgamma, M);
+				}
 			}
 			
 			if(iteration_counter==ItNum || test_fullstatistics==1){
 				break;
 			}
 			
+
+			
 		}
+
 		/*
 		 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 		 
@@ -737,11 +915,8 @@ extern "C" {
 		for (int i=0; i<Used.size(); i++) {
 			PARAMATERval[i]=(Mu.data[i]/(Scales.data[Used[i]]));
 		}
-			}
 		
+			}
+		}
 	}
-	}
-
-
 }
-
