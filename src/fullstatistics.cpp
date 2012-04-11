@@ -12,7 +12,7 @@
 
 using namespace std;
 
-void fullstatistics(int likelihood,const matrix &PHI,const matrix &BASIS,const matrix &BASIS2,matrix &beta,matrix& Sigma,matrix& Mu
+int fullstatistics(int likelihood,const matrix &PHI,const matrix &BASIS,const matrix &BASIS2,matrix &beta,matrix& Sigma,matrix& Mu
 				   , matrix &Alpha,double &logML,const matrix &Targets,const std::vector<int> &Used,matrix& Factor
 				   ,matrix &S_out, matrix &Q_in,matrix &S_in, matrix &Q_out,matrix &betaBASIS_PHI,matrix &Gamma){
 
@@ -22,6 +22,7 @@ void fullstatistics(int likelihood,const matrix &PHI,const matrix &BASIS,const m
 	int M_FULL=BASIS.cols;
 	int M=PHI.cols;
 	matrix y(Targets.rows,1),e(Targets.rows,1);
+	int error_output=0;
 	
 	matrix U;
 	double dataLikely;
@@ -32,7 +33,7 @@ void fullstatistics(int likelihood,const matrix &PHI,const matrix &BASIS,const m
 	}
 	else{
 
-		PosteriorMode(U,PHI,beta,Targets,Alpha,Mu,MAX_POSTMODE_ITS,likelihood,dataLikely);
+		error_output=PosteriorMode(U,PHI,beta,Targets,Alpha,Mu,MAX_POSTMODE_ITS,likelihood,dataLikely);
 
 		if (U.rows==1 and U.cols==1){
 			Ui.reset(1, 1);	
@@ -150,10 +151,11 @@ void fullstatistics(int likelihood,const matrix &PHI,const matrix &BASIS,const m
 		}
 		 
 	}
+	return(error_output);
 
 }
 	
-void PosteriorMode(matrix &U,const matrix &BASIS,matrix &beta, const matrix &Targets,const matrix &Alpha,matrix &Mu,int itsMax,int likelihood, double &dataLikely){
+int PosteriorMode(matrix &U,const matrix &BASIS,matrix &beta, const matrix &Targets,const matrix &Alpha,matrix &Mu,int itsMax,int likelihood, double &dataLikely){
 	
 	double GRADIENT_MIN=0.000001;
 	double STEP_MIN=1/(pow(2.0,8.0));
@@ -216,7 +218,7 @@ void PosteriorMode(matrix &U,const matrix &BASIS,matrix &beta, const matrix &Tar
 		
 		if (error!=0){
 			Rprintf("***Warning ** Ill conditioned Hessian (%f)\n",error);
-			exit(1);
+			return(1);
 		}
 		
 		bool gtest=1;
@@ -289,6 +291,7 @@ void PosteriorMode(matrix &U,const matrix &BASIS,matrix &beta, const matrix &Tar
 		
 	}
 	dataLikely=-dataError;
+	return(0);
 	
 }
 

@@ -118,7 +118,11 @@ extern "C" {
 		matrix beta(rows,1),SIGMA,Factor;
 		double logML;
 		
-		fullstatistics(1, PHI, BASIS,BASIS2,beta,SIGMA,Mu,Alpha,logML,Targets,Used,Factor,S_out,Q_in,S_in,Q_out,BASIS_B_PHI,Gamma);
+		int test_fullstatistics=fullstatistics(1, PHI, BASIS,BASIS2,beta,SIGMA,Mu,Alpha,logML,Targets,Used,Factor,S_out,Q_in,S_in,Q_out,BASIS_B_PHI,Gamma);
+		
+		if(test_fullstatistics==0){
+			
+		
 		
 		int N=BASIS.rows;
 		int M_full=BASIS.cols;
@@ -633,7 +637,7 @@ extern "C" {
 				}
 				else{
 					double newLogML=0.0;
-					fullstatistics(1, PHI, BASIS,BASIS2,beta,SIGMA,Mu,Alpha,newLogML,Targets,Used,Factor,S_out,Q_in,S_in,Q_out,BASIS_B_PHI,Gamma);
+					test_fullstatistics=fullstatistics(1, PHI, BASIS,BASIS2,beta,SIGMA,Mu,Alpha,newLogML,Targets,Used,Factor,S_out,Q_in,S_in,Q_out,BASIS_B_PHI,Gamma);
 					deltaLogMallrginal=newLogML-logML;
 				}
 				if(UpdateIteration && deltaLogMallrginal<0){
@@ -673,7 +677,7 @@ extern "C" {
 				Rprintf("%5d> L = %.6f\t Gamma = %.2f (M = %d)\n",iteration_counter, logML/N, sumgamma, M);
 			}
 			
-			if(iteration_counter==ItNum){
+			if(iteration_counter==ItNum || test_fullstatistics==1){
 				break;
 			}
 			
@@ -690,12 +694,17 @@ extern "C" {
 		 % 
 		 */
 		if (selectedAction!=ACTION_TERMINATE){
-			Rprintf("** Iteration limit: algorithm did not converge\n");
+			if (test_fullstatistics==1){
+				Rprintf("** Warning Problem with Cholskey Decomposition\n");
+			}
+			else{
+				Rprintf("** Iteration limit: algorithm did not converge\n");
+			}
 		}
 		int total	= addCount + deleteCount + updateCount;
 		if(BasisAlignmentTest)
 			total	= total+alignDeferCount;
-		
+			if(test_fullstatistics==0){
 		Rprintf("Action Summary\n");
 		Rprintf("==============\n");
 		Rprintf("Added\t\t\t%6d (%.0f%%)\n",addCount, 100*addCount/(total*1.0));
@@ -707,7 +716,7 @@ extern "C" {
 		}
 		Rprintf("==============\n");
 		Rprintf("Total of %d likelihood updates\n", count);
-		
+			
 		//std::vector<int> PARAMATERrev;
 		//matrix PARAMATERval;
 		
@@ -728,8 +737,9 @@ extern "C" {
 		for (int i=0; i<Used.size(); i++) {
 			PARAMATERval[i]=(Mu.data[i]/(Scales.data[Used[i]]));
 		}
+			}
 		
-		
+	}
 	}
 
 

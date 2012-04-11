@@ -1,7 +1,7 @@
 gaus <-
 function (data,lambda){
-	class=data[,length(data)]
-	data=data[,-length(data)]
+	class=data[,dim(data)[2]]
+	data=data[,-dim(data)[2]]
 	data=data.matrix(data)
 	X2=matrix(NA,dim(data)[1],dim(data)[1])
 	Y2=matrix(NA,dim(data)[1],dim(data)[1])
